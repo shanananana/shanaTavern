@@ -1,12 +1,12 @@
 const API = {
   get token() {
-    return localStorage.getItem("tm_token");
+    return localStorage.getItem("st_token");
   },
   set token(v) {
-    if (v) localStorage.setItem("tm_token", v);
+    if (v) localStorage.setItem("st_token", v);
     else {
-      localStorage.removeItem("tm_token");
-      try { sessionStorage.removeItem("tm_user"); } catch (_) {}
+      localStorage.removeItem("st_token");
+      try { sessionStorage.removeItem("st_user"); } catch (_) {}
     }
   },
 
@@ -142,7 +142,7 @@ const API = {
   },
 };
 
-const USER_CACHE_KEY = "tm_user";
+const USER_CACHE_KEY = "st_user";
 const USER_CACHE_TTL_MS = 300000;
 
 function _readCachedUser() {
@@ -340,7 +340,7 @@ function openChat(charId, meta) {
     return;
   }
   if (meta) {
-    try { sessionStorage.setItem("tm_chat_prefill", JSON.stringify({ id: charId, ...meta })); } catch (_) {}
+    try { sessionStorage.setItem("st_chat_prefill", JSON.stringify({ id: charId, ...meta })); } catch (_) {}
   }
   location.href = `/chat.html?character_id=${charId}`;
 }
@@ -366,7 +366,7 @@ function renderSidebar(active, user) {
     : "";
   return `
     <div class="sidebar">
-      <div class="logo">🍺 TavernMixer</div>
+      <div class="logo">🍺 shanaTavern</div>
       <nav>
         <a href="/index.html" class="${active === "home" ? "active" : ""}">首页</a>
         <a href="/discover.html" class="${active === "discover" ? "active" : ""}">发现</a>

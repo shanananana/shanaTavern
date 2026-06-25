@@ -1,6 +1,6 @@
 # Security
 
-TavernMixer is designed for **trusted local or LAN** use.
+shanaTavern is designed for **trusted local or LAN** use.
 
 ## Before exposing to a network
 

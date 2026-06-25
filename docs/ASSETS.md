@@ -14,4 +14,4 @@ These images were generated locally with AI image models (anime-style character 
 - Upload a new image via the character editor in the UI, or
 - Replace files under `data/uploads/defaults/` and restart (thumbnails regenerate on startup if missing).
 
-No ComfyUI or external generator is required to run TavernMixer.
+No ComfyUI or external generator is required to run shanaTavern.

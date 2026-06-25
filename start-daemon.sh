@@ -1,11 +1,21 @@
 #!/bin/bash
-# 后台稳定启动 TavernMixer + ngrok 隧道
+# 后台稳定启动 shanaTavern（ngrok 可选，见 .env ENABLE_NGROK）
 set -e
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-LOG="/tmp/tavernmixer.log"
-NGROK_LOG="/tmp/tavernmixer-ngrok.log"
-PIDFILE="/tmp/tavernmixer.pid"
-NGROK_PIDFILE="/tmp/tavernmixer-ngrok.pid"
+LOG="/tmp/shanatavern.log"
+NGROK_LOG="/tmp/shanatavern-ngrok.log"
+PIDFILE="/tmp/shanatavern.pid"
+NGROK_PIDFILE="/tmp/shanatavern-ngrok.pid"
+
+# 从 .env 读取 ENABLE_NGROK，默认 false
+ENABLE_NGROK=false
+if [ -f "$ROOT/.env" ]; then
+  val=$(grep -E '^ENABLE_NGROK=' "$ROOT/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d ' "'\''')
+  [ -n "$val" ] && ENABLE_NGROK="$val"
+fi
+is_true() {
+  case "${1,,}" in true|1|yes|on) return 0 ;; *) return 1 ;; esac
+}
 
 ngrok_url() {
   curl -sf --connect-timeout 2 http://127.0.0.1:4040/api/tunnels 2>/dev/null \
@@ -22,9 +32,12 @@ start_backend() {
     return 0
   fi
   cd "$ROOT/backend"
-  nohup .venv/bin/uvicorn main:app --host 0.0.0.0 --port 8787 >> "$LOG" 2>&1 &
+  nohup .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8787 >> "$LOG" 2>&1 &
   echo $! > "$PIDFILE"
-  sleep 1
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    curl -sf --connect-timeout 2 http://127.0.0.1:8787/ >/dev/null && break
+    sleep 1
+  done
   curl -sf --connect-timeout 2 http://127.0.0.1:8787/ >/dev/null \
     || { echo "后端启动失败: tail -20 $LOG"; exit 1; }
   echo "后端已启动"
@@ -56,10 +69,17 @@ start_ngrok() {
 }
 
 start_backend
-start_ngrok
+if is_true "$ENABLE_NGROK"; then
+  start_ngrok
+else
+  echo "ngrok 未启用（.env 中设置 ENABLE_NGROK=true 可开启）"
+fi
 
 IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo "本机IP")
-URL=$(ngrok_url)
+URL=""
+if is_true "$ENABLE_NGROK"; then
+  URL=$(ngrok_url)
+fi
 
 echo ""
 echo "访问地址："
@@ -67,6 +87,9 @@ echo "  本机:   http://127.0.0.1:8787"
 echo "  局域网: http://${IP}:8787"
 if [ -n "$URL" ]; then
   echo "  公网:   $URL"
+  echo "  ngrok 面板: http://127.0.0.1:4040"
 fi
-echo "  ngrok 面板: http://127.0.0.1:4040"
-echo "  日志:   $LOG / $NGROK_LOG"
+echo "  日志:   $LOG"
+if is_true "$ENABLE_NGROK"; then
+  echo "          $NGROK_LOG"
+fi

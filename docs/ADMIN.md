@@ -10,7 +10,7 @@ URL: `/admin.html` (requires `is_admin` user)
 
 ## Hidden ops page
 
-URL: `/__tm/ops` (not linked from the UI; `noindex`)
+URL: `/__st/ops`（旧路径 `/__tm/ops` 会自动跳转；无 UI 入口；`noindex`）
 
 Requires admin login. Features:
 

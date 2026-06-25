@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>对话 - TavernMixer</title>
+  <title>对话 - shanaTavern</title>
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
   <div class="app-shell" id="app-shell"></div>
-  <script src="/static/js/api.js?v=4"></script>
+  <script src="/static/js/api.js?v=5"></script>
   <script>
     let currentSessionId = null;
     let currentCharId = null;
@@ -47,7 +47,7 @@
 
     function readPrefill(charId) {
       try {
-        const raw = sessionStorage.getItem("tm_chat_prefill");
+        const raw = sessionStorage.getItem("st_chat_prefill");
         if (!raw) return null;
         const data = JSON.parse(raw);
         if (+data.id === +charId) return data;

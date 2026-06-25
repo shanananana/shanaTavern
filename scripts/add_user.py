@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""本地添加 TavernMixer 用户（注册已关闭时使用）。"""
+"""本地添加 shanaTavern 用户（注册已关闭时使用）。"""
 from __future__ import annotations
 
 import argparse
@@ -14,7 +14,7 @@ from app.models import User
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="添加 TavernMixer 登录账号")
+    parser = argparse.ArgumentParser(description="添加 shanaTavern 登录账号")
     parser.add_argument("username", help="用户名")
     parser.add_argument("password", help="密码")
     parser.add_argument("--nickname", default="", help="昵称（可选）")

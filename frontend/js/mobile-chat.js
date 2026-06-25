@@ -36,7 +36,7 @@ const MobileChat = {
         e.preventDefault();
         if (this.charId) {
           try {
-            sessionStorage.setItem("tm_chat_prefill", JSON.stringify({ id: this.charId, ...this.char }));
+            sessionStorage.setItem("st_chat_prefill", JSON.stringify({ id: this.charId, ...this.char }));
           } catch (_) {}
           location.href = `/chat.html?character_id=${this.charId}`;
         }

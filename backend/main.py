@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.gzip import GZipMiddleware
@@ -42,7 +42,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="TavernMixer", description="酒馆 AI 配料", lifespan=lifespan)
+app = FastAPI(title="shanaTavern", description="本地 AI 角色扮演酒馆", lifespan=lifespan)
 
 app.add_middleware(GZipMiddleware, minimum_size=500)
 app.add_middleware(CacheControlMiddleware)
@@ -101,12 +101,18 @@ def index():
     return _page("index.html")
 
 
-@app.get("/__tm/ops")
+@app.get("/__st/ops")
 def internal_ops_page():
     """Hidden ops page — not linked from UI; admin login required in-page."""
     if not INTERNAL_OPS_PAGE.exists():
         return FileResponse(FRONTEND_DIR / "index.html")
     return FileResponse(INTERNAL_OPS_PAGE, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/__tm/ops")
+def internal_ops_page_legacy():
+    """Legacy path from TavernMixer era."""
+    return RedirectResponse(url="/__st/ops", status_code=307)
 
 
 @app.get("/{page_name}.html")

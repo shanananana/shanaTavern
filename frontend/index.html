@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>首页 - TavernMixer</title>
+  <title>首页 - shanaTavern</title>
   <link rel="preload" href="/static/css/style.css" as="style">
-  <link rel="preload" href="/static/js/api.js?v=4" as="script">
+  <link rel="preload" href="/static/js/api.js?v=5" as="script">
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
   <div class="app-shell" id="app-shell"></div>
-  <script src="/static/js/api.js?v=4"></script>
+  <script src="/static/js/api.js?v=5"></script>
   <script>
     function charCard(c, compact, priority) {
       const tags = c.tags ? c.tags.split(",").slice(0, 4).map(t => `<span class="tag">${escHtml(t.trim())}</span>`).join("") : "";

@@ -9,6 +9,7 @@
 | **技术** | FastAPI · SQLite · 纯 HTML/JS |
 | **模型** | LM Studio、Ollama 等 OpenAI 兼容 API |
 | **开箱** | 62 个默认角色 + AI 头像，clone 即用 |
+| **公网** | 可选 [ngrok](https://ngrok.com/) 隧道，`.env` 设 `ENABLE_NGROK=true` 后 `./start-daemon.sh` 一键暴露（默认关闭） |
 
 [English](#english) · [License: MIT](LICENSE)
 
@@ -36,6 +37,7 @@
 - **流式对话** — SSE 实时输出，支持重新生成
 - **移动端友好** — 全屏对话浮层，底部导航，无需整页跳转
 - **自托管** — SQLite 单文件数据库，无 Docker 依赖，适合个人/小团队局域网部署
+- **可选 ngrok** — 需要手机或外网访问时，开启 ngrok 即可生成公网链接（见下方「后台 / 局域网启动」）
 
 ## 技术栈
 
@@ -175,13 +177,44 @@ shanaTavern/
 ./start-daemon.sh
 ```
 
-需要公网访问时，在 `.env` 中设置 `ENABLE_NGROK=true`（需已安装 [ngrok](https://ngrok.com/)）。默认不启动 ngrok。
+默认只启动本机 / 局域网服务（`http://127.0.0.1:8787`）。
+
+### 可选：ngrok 公网访问
+
+shanaTavern **不包含** ngrok 账号配置，需在本机自行安装并登录 [ngrok](https://ngrok.com/)（免费版即可）。
+
+**一次性配置：**
+
+1. 注册 ngrok 账号，在 Dashboard 复制 **Authtoken**
+2. 本机执行（只需一次）：
+
+```bash
+ngrok config add-authtoken <你的 token>
+```
+
+3. 在项目 `.env` 中设置：
+
+```env
+ENABLE_NGROK=true
+```
+
+4. 运行 `./start-daemon.sh`，终端会打印公网 URL；管理面板：`http://127.0.0.1:4040`
+
+**注意：**
+
+- Authtoken 是敏感信息，**不要**写入 `.env` 或提交到 Git（走 ngrok 自己的配置文件）
+- 免费版每次重启 URL 可能变化；固定域名需 ngrok 付费方案
+- 公网暴露前请阅读 [docs/SECURITY.md](docs/SECURITY.md)，务必修改默认密码与 `SECRET_KEY`
+
+### Optional: ngrok (public access)
+
+Install [ngrok](https://ngrok.com/), run `ngrok config add-authtoken <token>` once, set `ENABLE_NGROK=true` in `.env`, then `./start-daemon.sh`. Do not commit your authtoken.
 
 ---
 
 ## English
 
-**shanaTavern** is a self-hosted AI roleplay chat platform with a SillyTavern-inspired prompt system. It ships with 62 ready-to-use characters, streams replies from any OpenAI-compatible API, and runs as a single Python process with a zero-build static frontend.
+**shanaTavern** is a self-hosted AI roleplay chat platform with a SillyTavern-inspired prompt system. It ships with 62 ready-to-use characters, streams replies from any OpenAI-compatible API, and runs as a single Python process with a zero-build static frontend. Optional [ngrok](https://ngrok.com/) tunnel support (`ENABLE_NGROK=true` in `.env`) for public/mobile access.
 
 ```bash
 git clone https://github.com/shanananana/shanaTavern.git

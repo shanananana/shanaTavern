@@ -21,6 +21,12 @@ shanaTavern 面向**可信的本机 / 局域网**环境设计。
 
 开发模式允许较宽的 CORS。生产环境可通过 `config.py` 或环境变量收紧来源。
 
+## ngrok 公网隧道
+
+- 需先在 [ngrok.com](https://ngrok.com/) 注册，并执行 `ngrok config add-authtoken <token>`（**不要**把 token 写进 `.env` 或 Git）
+- 在 `.env` 中设 `ENABLE_NGROK=true` 后，由 `./start-daemon.sh` 启动隧道
+- 免费版 URL 可能随重启变化；公网暴露等同于把整站开放给互联网，务必修改默认凭据并阅读上文安全项
+
 ---
 
 shanaTavern is designed for **trusted local or LAN** use.
@@ -43,3 +49,9 @@ shanaTavern is designed for **trusted local or LAN** use.
 ## CORS
 
 Development mode allows broad CORS. Restrict origins in production via `config.py` / environment if needed.
+
+## ngrok public tunnel
+
+- Sign up at [ngrok.com](https://ngrok.com/) and run `ngrok config add-authtoken <token>` once (never commit the token)
+- Set `ENABLE_NGROK=true` in `.env`; `./start-daemon.sh` starts the tunnel
+- Free-tier URLs may change on restart; exposing to the public internet requires changing default credentials and following the items above

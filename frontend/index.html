@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>首页 - TavernMixer</title>
+  <link rel="preload" href="/static/css/style.css" as="style">
+  <link rel="preload" href="/static/js/api.js?v=4" as="script">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="app-shell" id="app-shell"></div>
+  <script src="/static/js/api.js?v=4"></script>
+  <script>
+    function charCard(c, compact, priority) {
+      const tags = c.tags ? c.tags.split(",").slice(0, 4).map(t => `<span class="tag">${escHtml(t.trim())}</span>`).join("") : "";
+      const fav = c.is_favorited ? "♥" : "♡";
+      return `<div class="card card-with-avatar ${compact ? "card-compact" : ""}">
+        ${avatarImg(c.avatar_url, c.name, "avatar", priority)}
+        <div class="card-body">
+          <h3>${escHtml(c.name)}</h3>
+          <p>${escHtml(c.description || "")}</p>
+          ${tags}
+          <div class="card-actions">
+            <button type="button" class="btn btn-primary btn-sm" onclick='openChat(${c.id}, ${JSON.stringify({ name: c.name, avatar_url: c.avatar_url, description: c.description || "" })})'>开聊</button>
+            <button class="btn btn-secondary btn-sm" onclick="quickFav(${c.id}, this)">${fav}</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
+    async function quickFav(id, btn) {
+      const r = await API.post(`/api/characters/${id}/favorite`);
+      btn.textContent = r.favorited ? "♥" : "♡";
+      const chars = API._cache.get(API._cacheKey("/api/characters"));
+      if (chars?.data) {
+        const item = chars.data.find(c => c.id === id);
+        if (item) item.is_favorited = r.favorited;
+      }
+    }
+
+    window.onAppReady = async (user) => {
+      const main = document.getElementById("main-content");
+      if (!main) throw new Error("页面结构异常，请刷新重试");
+      main.innerHTML = `<div class="page-header"><h1>加载中…</h1></div>`;
+
+      const boot = window._bootstrap;
+      const allChars = Array.isArray(boot?.characters)
+        ? boot.characters
+        : await API.cachedGet("/api/characters", 120000);
+      const sessions = Array.isArray(boot?.sessions)
+        ? boot.sessions
+        : await API.cachedGet("/api/chat/sessions", 30000);
+      const sorted = sortByCuteness(allChars);
+      const favs = sorted.filter(c => c.is_favorited);
+      const female = sorted.filter(c => (c.tags || "").includes("女性"));
+      const cute = sorted.filter(c => (c.tags || "").includes("可爱"));
+      const pick = cute.slice(0, 6);
+
+      main.innerHTML = `
+        <div class="page-header">
+          <div>
+            <h1>欢迎，${escHtml(user.nickname || user.username)}</h1>
+            <p class="subtitle">今晚想遇见谁？</p>
+          </div>
+          <button class="btn btn-primary" id="random-btn">🎲 随机遇见</button>
+        </div>
+        <div class="grid stats-grid" style="margin-bottom:1.5rem">
+          <div class="card stat-card">
+            <h3>${female.length}</h3>
+            <p>可爱女角色</p>
+          </div>
+          <div class="card stat-card">
+            <h3>${sessions.length}</h3>
+            <p>我的对话</p>
+          </div>
+          <div class="card stat-card">
+            <h3>${favs.length}</h3>
+            <p>收藏角色</p>
+          </div>
+          <div class="card stat-card" id="llm-stat">
+            <span class="badge badge-err">检测中…</span>
+            <p style="margin-top:0.35rem;font-size:0.75rem;color:var(--text-muted)">LLM</p>
+          </div>
+        </div>
+        <div class="section-header">
+          <h2>✨ 今日推荐</h2>
+          <a href="/characters.html?scope=cute">查看全部 →</a>
+        </div>
+        <div class="grid" id="pick-grid"></div>
+        ${favs.length ? `<div class="section-header" style="margin-top:2rem"><h2>♥ 我的收藏</h2></div><div class="grid" id="fav-grid"></div>` : ""}
+        <div class="section-header" style="margin-top:2rem">
+          <h2>🔥 快捷入口</h2>
+        </div>
+        <div class="quick-links">
+          <a href="/characters.html?scope=cute" class="quick-link">可爱少女</a>
+          <a href="/characters.html?scope=female" class="quick-link">女性角色</a>
+          <a href="/ingredients.html" class="quick-link">配料调酒台</a>
+          <a href="/discover.html" class="quick-link">发现 & 搜索</a>
+        </div>
+      `;
+      document.getElementById("pick-grid").innerHTML = pick.map((c, i) => charCard(c, false, i < 3)).join("");
+      if (favs.length) document.getElementById("fav-grid").innerHTML = favs.map(c => charCard(c, true)).join("");
+      document.getElementById("random-btn").addEventListener("click", async () => {
+        const c = await API.get("/api/characters/random?scope=cute");
+        openChat(c.id, { name: c.name, avatar_url: c.avatar_url, description: c.description || "" });
+      });
+
+      API.get("/api/llm-info").then(llm => {
+        const el = document.getElementById("llm-stat");
+        if (!el) return;
+        el.innerHTML = `
+          <span class="badge ${llm.connected ? "badge-ok" : "badge-err"}">${llm.connected ? "LLM 在线" : "LLM 离线"}</span>
+          <p style="margin-top:0.35rem;font-size:0.75rem;color:var(--text-muted)">${escHtml(llm.model)}</p>`;
+      }).catch(() => {});
+    };
+    mountShell("home", { bootstrap: true });
+  </script>
+</body>
+</html>

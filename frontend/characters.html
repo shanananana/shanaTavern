@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>角色 - TavernMixer</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="app-shell" id="app-shell"></div>
+  <script src="/static/js/api.js?v=4"></script>
+  <script>
+    let currentScope = new URLSearchParams(location.search).get("scope") || "all";
+    let searchQ = "";
+
+    window.onAppReady = async () => {
+      const main = document.getElementById("main-content");
+      main.innerHTML = `
+        <div class="page-header">
+          <h1>角色</h1>
+          <div style="display:flex;gap:0.5rem">
+            <button class="btn btn-secondary btn-sm" id="import-btn">导入 JSON</button>
+            <a href="/character-edit.html" class="btn btn-primary">创建角色</a>
+          </div>
+        </div>
+        <div class="tabs" id="scope-tabs">
+          <div class="tab" data-scope="all">全部</div>
+          <div class="tab" data-scope="cute">可爱</div>
+          <div class="tab" data-scope="female">女性</div>
+          <div class="tab" data-scope="default">默认</div>
+          <div class="tab" data-scope="mine">我的</div>
+          <div class="tab" data-scope="public">公开</div>
+          <div class="tab" data-scope="favorites">收藏</div>
+        </div>
+        <div class="search-bar" style="margin-bottom:1rem">
+          <input type="search" id="search-input" placeholder="搜索角色…">
+        </div>
+        <div class="grid" id="char-grid"></div>
+        <input type="file" id="import-file" accept=".json" style="display:none">
+      `;
+      document.querySelectorAll("#scope-tabs .tab").forEach(t => {
+        t.classList.toggle("active", t.dataset.scope === currentScope);
+        t.addEventListener("click", () => { currentScope = t.dataset.scope; loadChars(); document.querySelectorAll("#scope-tabs .tab").forEach(x => x.classList.toggle("active", x.dataset.scope === currentScope)); });
+      });
+      document.getElementById("import-btn").addEventListener("click", () => document.getElementById("import-file").click());
+      document.getElementById("import-file").addEventListener("change", async e => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+          const json = JSON.parse(await file.text());
+          const c = await API.post("/api/characters/import", json);
+          location.href = `/character-edit.html?id=${c.id}`;
+        } catch (ex) { alert("导入失败: " + ex.message); }
+      });
+      let timer;
+      document.getElementById("search-input").addEventListener("input", e => {
+        clearTimeout(timer);
+        timer = setTimeout(() => { searchQ = e.target.value.trim(); loadChars(); }, 300);
+      });
+      loadChars();
+    };
+
+    async function loadChars() {
+      let url = `/api/characters?scope=${currentScope}`;
+      if (searchQ) url += `&q=${encodeURIComponent(searchQ)}`;
+      const chars = searchQ
+        ? await API.get(url)
+        : await API.cachedGet(url, 120000);
+      const grid = document.getElementById("char-grid");
+      if (!chars.length) { grid.innerHTML = `<div class="empty-state">暂无角色</div>`; return; }
+      grid.innerHTML = chars.map(c => {
+        const tags = c.tags ? c.tags.split(",").map(t => `<span class="tag">${escHtml(t.trim())}</span>`).join("") : "";
+        const badge = c.is_default ? `<span class="badge badge-ok">默认</span>` : "";
+        return `<div class="card card-with-avatar">
+          ${avatarImg(c.avatar_url, c.name)}
+          <div class="card-body">
+          <h3>${escHtml(c.name)} ${badge}</h3>
+          <p>${escHtml(c.description || "")}</p>${tags}
+          <div style="margin-top:0.75rem;display:flex;gap:0.4rem;flex-wrap:wrap">
+            <button type="button" class="btn btn-primary btn-sm" onclick='openChat(${c.id}, ${JSON.stringify({ name: c.name, avatar_url: c.avatar_url, description: c.description || "" })})'>对话</button>
+            ${c.can_edit
+              ? `<a href="/character-edit.html?id=${c.id}" class="btn btn-secondary btn-sm">编辑</a>`
+              : `<a href="/character-edit.html?id=${c.id}&readonly=1" class="btn btn-secondary btn-sm">查看</a>`}
+            <button class="btn btn-secondary btn-sm" onclick="forkChar(${c.id})">复制</button>
+            <button class="btn btn-secondary btn-sm" onclick="favChar(${c.id})">收藏</button>
+            <button class="btn btn-secondary btn-sm" onclick="exportChar(${c.id})">导出</button>
+            ${c.can_edit ? `<button class="btn btn-danger btn-sm" onclick="delChar(${c.id})">删除</button>` : ""}
+          </div>
+          </div>
+        </div>`;
+      }).join("");
+    }
+
+    async function forkChar(id) { const c = await API.post(`/api/characters/${id}/fork`); location.href = `/character-edit.html?id=${c.id}`; }
+    async function favChar(id) { const r = await API.post(`/api/characters/${id}/favorite`); alert(r.favorited ? "已收藏" : "已取消收藏"); }
+    async function exportChar(id) {
+      const data = await API.get(`/api/characters/${id}/export`);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `character-${id}.json`; a.click();
+    }
+    async function delChar(id) { if (!confirm("确定删除？")) return; await API.delete(`/api/characters/${id}`); loadChars(); }
+
+    mountShell("characters");
+  </script>
+</body>
+</html>

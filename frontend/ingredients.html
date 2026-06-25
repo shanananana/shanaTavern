@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>配料 & 配方 - TavernMixer</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="app-shell" id="app-shell"></div>
+  <script src="/static/js/api.js?v=4"></script>
+  <script>
+    let selectedIngredients = new Set();
+
+    window.onAppReady = async () => {
+      const main = document.getElementById("main-content");
+      main.innerHTML = `
+        <div class="page-header">
+          <h1>配料 & 配方</h1>
+          <button class="btn btn-primary" id="new-ing-btn">新建配料</button>
+        </div>
+        <div class="tabs">
+          <div class="tab active" data-tab="ingredients">配料库</div>
+          <div class="tab" data-tab="recipes">我的配方</div>
+          <div class="tab" data-tab="mixer">调酒台</div>
+        </div>
+        <div id="tab-content"></div>
+      `;
+      document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
+        t.classList.add("active");
+        renderTab(t.dataset.tab);
+      }));
+      document.getElementById("new-ing-btn").addEventListener("click", () => {
+        const name = prompt("配料名称"); if (!name) return;
+        const category = prompt("分类 (personality/scenario/style/post_history/system)", "personality");
+        const content = prompt("配料内容"); if (!content) return;
+        API.post("/api/ingredients", { name, category: category || "personality", content }).then(() => renderTab("ingredients"));
+      });
+      renderTab("ingredients");
+    };
+
+    async function renderTab(tab) {
+      const el = document.getElementById("tab-content");
+      if (tab === "ingredients") {
+        const items = await API.cachedGet("/api/ingredients", 120000);
+        el.innerHTML = `<div class="grid">${items.map(i => `
+          <div class="card">
+            <h3>${escHtml(i.name)} ${i.is_system ? '<span class="badge badge-ok">系统</span>' : ""}</h3>
+            <span class="tag">${escHtml(i.category)}</span>
+            <p style="margin-top:0.5rem">${escHtml(i.content)}</p>
+            <button class="btn btn-secondary btn-sm" style="margin-top:0.5rem" onclick="toggleIng(${i.id})">加入调酒台</button>
+          </div>`).join("")}</div>`;
+      } else if (tab === "recipes") {
+        const recipes = await API.cachedGet("/api/recipes", 60000);
+        el.innerHTML = recipes.length ? `<div class="grid">${recipes.map(r => `
+          <div class="card">
+            <h3>${escHtml(r.name)}</h3>
+            <p>${escHtml(r.description || "")}</p>
+            <p style="font-size:0.85rem;color:var(--text-muted)">${r.items.length} 种配料</p>
+            <button class="btn btn-primary btn-sm" onclick="applyRecipe(${r.id})">生成角色</button>
+            <button class="btn btn-danger btn-sm" onclick="delRecipe(${r.id})">删除</button>
+          </div>`).join("")}</div>` : `<div class="empty-state">暂无配方，去调酒台调配后保存</div>`;
+      } else {
+        const items = await API.cachedGet("/api/ingredients", 120000);
+        el.innerHTML = `
+          <p style="color:var(--text-muted);margin-bottom:1rem">已选 ${selectedIngredients.size} 种配料</p>
+          <div class="grid" id="mixer-grid">${items.map(i => `
+            <div class="card" style="${selectedIngredients.has(i.id) ? "border-color:var(--accent)" : ""}" onclick="toggleIng(${i.id});renderTab('mixer')">
+              <h3>${escHtml(i.name)}</h3>
+              <span class="tag">${escHtml(i.category)}</span>
+              <p>${escHtml(i.content.slice(0, 80))}…</p>
+            </div>`).join("")}</div>
+          <div style="margin-top:1.5rem;display:flex;gap:0.5rem">
+            <button class="btn btn-primary" onclick="saveRecipe()">保存为配方</button>
+            <button class="btn btn-secondary" onclick="applyMixer()">直接生成角色</button>
+          </div>`;
+      }
+    }
+
+    function toggleIng(id) {
+      if (selectedIngredients.has(id)) selectedIngredients.delete(id);
+      else selectedIngredients.add(id);
+    }
+
+    async function saveRecipe() {
+      if (!selectedIngredients.size) { alert("请先选择配料"); return; }
+      const name = prompt("配方名称"); if (!name) return;
+      const items = [...selectedIngredients].map((id, i) => ({ ingredient_id: id, sort_order: i }));
+      await API.post("/api/recipes", { name, items });
+      selectedIngredients.clear();
+      alert("配方已保存");
+      document.querySelector('[data-tab="recipes"]').click();
+    }
+
+    async function applyMixer() {
+      if (!selectedIngredients.size) { alert("请先选择配料"); return; }
+      const name = prompt("角色名称", "新角色"); if (!name) return;
+      const recipe = await API.post("/api/recipes", { name: "_temp_" + Date.now(), items: [...selectedIngredients].map((id, i) => ({ ingredient_id: id, sort_order: i })) });
+      const result = await API.post(`/api/recipes/${recipe.id}/apply`, { name });
+      await API.delete(`/api/recipes/${recipe.id}`);
+      location.href = `/character-edit.html?id=${result.character.id}`;
+    }
+
+    async function applyRecipe(id) {
+      const name = prompt("角色名称", "新角色"); if (!name) return;
+      const result = await API.post(`/api/recipes/${id}/apply`, { name });
+      location.href = `/character-edit.html?id=${result.character.id}`;
+    }
+
+    async function delRecipe(id) { if (!confirm("删除配方？")) return; await API.delete(`/api/recipes/${id}`); renderTab("recipes"); }
+
+    mountShell("ingredients");
+  </script>
+</body>
+</html>

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ops</title>
+  <link rel="stylesheet" href="/static/css/style.css?v=3">
+  <style>
+    .ops-wrap { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
+    .ops-layout { display: grid; grid-template-columns: 320px 1fr; gap: 1rem; }
+    @media (max-width: 900px) { .ops-layout { grid-template-columns: 1fr; } }
+    .ops-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; max-height: 75vh; overflow: auto; }
+    .ops-row { padding: 0.65rem 0.5rem; border-bottom: 1px solid var(--border); cursor: pointer; border-radius: 8px; }
+    .ops-row:hover, .ops-row.active { background: rgba(255,255,255,0.04); }
+    .ops-row-meta { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem; }
+    .ops-row-nested { padding-left: 0.75rem; border-left: 2px solid var(--border); margin-left: 0.35rem; }
+    .ops-section-title { font-size: 0.8rem; color: var(--text-muted); margin: 0.75rem 0 0.35rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .ops-msg { margin-bottom: 0.75rem; padding: 0.65rem 0.75rem; border-radius: 8px; background: rgba(255,255,255,0.03); }
+    .ops-msg.user { border-left: 3px solid var(--accent); }
+    .ops-msg.assistant { border-left: 3px solid #6b8cff; }
+    .ops-msg-role { font-size: 0.7rem; color: var(--text-muted); margin-bottom: 0.35rem; }
+    .ops-msg-body { white-space: pre-wrap; word-break: break-word; font-size: 0.9rem; line-height: 1.5; }
+    .ops-toolbar { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+    .ops-toolbar input { flex: 1; min-width: 160px; }
+    .ops-back { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 0.85rem; padding: 0; margin-bottom: 0.5rem; }
+  </style>
+</head>
+<body>
+  <div id="root" class="ops-wrap"></div>
+  <script src="/static/js/api.js?v=4"></script>
+  <script>
+    let activeUserId = null;
+    let activeSessionId = null;
+    let usersCache = [];
+    let sessionsCache = [];
+
+    function fmtTime(iso) {
+      return formatDateTime(iso);
+    }
+
+    function renderMessages(msgs, meta) {
+      const el = document.getElementById("ops-messages");
+      if (!el) return;
+      if (!msgs.length) {
+        el.innerHTML = `<div class="empty-state">暂无消息</div>`;
+        return;
+      }
+      el.innerHTML = `
+        <div style="margin-bottom:0.75rem;font-size:0.85rem;color:var(--text-muted)">
+          ${escHtml(meta.username)} · ${escHtml(meta.character_name)} · ${escHtml(meta.title)} · #${meta.id}
+        </div>
+        ${msgs.map(m => `
+          <div class="ops-msg ${escHtml(m.role)}">
+            <div class="ops-msg-role">${escHtml(m.role)} · ${fmtTime(m.created_at)}</div>
+            <div class="ops-msg-body">${escHtml(m.content)}</div>
+          </div>`).join("")}`;
+    }
+
+    function renderUsers(users) {
+      const el = document.getElementById("ops-users");
+      if (!el) return;
+      if (!users.length) {
+        el.innerHTML = `<div class="empty-state">无用户</div>`;
+        return;
+      }
+      el.innerHTML = users.map(u => `
+        <div class="ops-row ${activeUserId === u.user_id ? "active" : ""}" data-user-id="${u.user_id}">
+          <strong>${escHtml(u.username)}</strong>
+          <div class="ops-row-meta">
+            ${u.session_count} 会话 · ${u.message_count} 条
+            ${u.last_active ? ` · 最近 ${fmtTime(u.last_active)}` : ""}
+          </div>
+        </div>`).join("");
+      el.querySelectorAll(".ops-row").forEach(row => {
+        row.addEventListener("click", () => selectUser(+row.dataset.userId));
+      });
+    }
+
+    function renderSessions(sessions, username) {
+      const wrap = document.getElementById("ops-sessions-wrap");
+      const el = document.getElementById("ops-sessions");
+      if (!wrap || !el) return;
+      wrap.style.display = activeUserId ? "block" : "none";
+      if (!activeUserId) {
+        el.innerHTML = "";
+        return;
+      }
+      document.getElementById("ops-sessions-user").textContent = username || "";
+      if (!sessions.length) {
+        el.innerHTML = `<div class="empty-state">该用户暂无会话</div>`;
+        return;
+      }
+      el.innerHTML = sessions.map(s => `
+        <div class="ops-row ops-row-nested ${activeSessionId === s.id ? "active" : ""}" data-id="${s.id}">
+          ${escHtml(s.character_name)}
+          <div class="ops-row-meta">
+            ${escHtml(s.title)} · ${s.message_count} 条 · ${fmtTime(s.updated_at)}
+          </div>
+        </div>`).join("");
+      el.querySelectorAll(".ops-row").forEach(row => {
+        row.addEventListener("click", e => {
+          e.stopPropagation();
+          loadMessages(+row.dataset.id);
+        });
+      });
+    }
+
+    async function loadUsers(q = "") {
+      const path = q ? `/api/internal/ops/users?q=${encodeURIComponent(q)}` : "/api/internal/ops/users";
+      usersCache = await API.get(path);
+      renderUsers(usersCache);
+      return usersCache;
+    }
+
+    async function loadSessionsForUser(userId) {
+      sessionsCache = await API.get(`/api/internal/ops/sessions?user_id=${userId}`);
+      const user = usersCache.find(u => u.user_id === userId);
+      renderSessions(sessionsCache, user?.username || "");
+      return sessionsCache;
+    }
+
+    async function selectUser(userId) {
+      activeUserId = userId;
+      activeSessionId = null;
+      renderUsers(usersCache);
+      const el = document.getElementById("ops-messages");
+      if (el) el.innerHTML = `<div class="empty-state">选择该用户的会话查看消息</div>`;
+      await loadSessionsForUser(userId);
+    }
+
+    async function loadMessages(sessionId) {
+      activeSessionId = sessionId;
+      document.querySelectorAll("#ops-sessions .ops-row").forEach(r => {
+        r.classList.toggle("active", +r.dataset.id === sessionId);
+      });
+      const meta = sessionsCache.find(s => s.id === sessionId) || {
+        id: sessionId,
+        username: usersCache.find(u => u.user_id === activeUserId)?.username || "?",
+        character_name: "?",
+        title: "",
+      };
+      const el = document.getElementById("ops-messages");
+      if (el) el.innerHTML = `<div class="empty-state">加载中…</div>`;
+      const msgs = await API.get(`/api/internal/ops/sessions/${sessionId}/messages`);
+      renderMessages(msgs, meta);
+    }
+
+    async function boot(user) {
+      const root = document.getElementById("root");
+      if (!user?.is_admin) {
+        root.textContent = "";
+        return;
+      }
+      root.innerHTML = `
+        <div class="page-header" style="margin-bottom:1rem">
+          <h1>聊天记录</h1>
+          <p class="subtitle">按用户聚合 · 仅管理员 · ${escHtml(user.username)}</p>
+        </div>
+        <div class="ops-toolbar">
+          <input type="search" id="ops-q" class="input" placeholder="按用户名筛选…">
+          <button class="btn btn-primary btn-sm" id="ops-search">查询</button>
+          <button class="btn btn-secondary btn-sm" id="ops-refresh">刷新</button>
+        </div>
+        <div class="ops-layout">
+          <div class="ops-panel">
+            <h3 style="margin:0 0 0.75rem;font-size:0.95rem">用户</h3>
+            <div id="ops-users"><div class="empty-state">加载中…</div></div>
+            <div id="ops-sessions-wrap" style="display:none">
+              <div class="ops-section-title">会话 · <span id="ops-sessions-user"></span></div>
+              <div id="ops-sessions"></div>
+            </div>
+          </div>
+          <div class="ops-panel">
+            <h3 style="margin:0 0 0.75rem;font-size:0.95rem">消息详情</h3>
+            <div id="ops-messages"><div class="empty-state">选择用户与会话</div></div>
+          </div>
+        </div>`;
+
+      const refresh = async () => {
+        const q = document.getElementById("ops-q").value.trim();
+        const prevUser = activeUserId;
+        activeUserId = null;
+        activeSessionId = null;
+        await loadUsers(q);
+        if (prevUser && usersCache.some(u => u.user_id === prevUser)) {
+          await selectUser(prevUser);
+        } else {
+          document.getElementById("ops-sessions-wrap").style.display = "none";
+          document.getElementById("ops-messages").innerHTML = `<div class="empty-state">选择用户与会话</div>`;
+        }
+      };
+      document.getElementById("ops-search").addEventListener("click", refresh);
+      document.getElementById("ops-refresh").addEventListener("click", refresh);
+      document.getElementById("ops-q").addEventListener("keydown", e => { if (e.key === "Enter") refresh(); });
+      try {
+        await refresh();
+      } catch (err) {
+        root.innerHTML = `<div class="empty-state">${escHtml(err.message)}</div>`;
+      }
+    }
+
+    requireAuth().then(boot).catch(() => {
+      document.getElementById("root").textContent = "";
+    });
+  </script>
+</body>
+</html>

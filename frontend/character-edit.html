@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>编辑角色 - TavernMixer</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="app-shell" id="app-shell"></div>
+  <script src="/static/js/api.js?v=4"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const charId = params.get("id");
+    const readonly = params.get("readonly") === "1";
+    let lorebook = [];
+    let locked = readonly;
+    let currentCharData = null;
+
+    window.onAppReady = async (user) => {
+      if (!charId) {
+        renderForm("create");
+        return;
+      }
+      const c = await API.get(`/api/characters/${charId}`);
+      locked = !c.can_edit || readonly;
+      renderForm(locked ? "view" : "edit");
+      fillChar(c);
+    };
+
+    function renderForm(mode) {
+      const isView = mode === "view";
+      const main = document.getElementById("main-content");
+      main.innerHTML = `
+        <div class="page-header">
+          <h1>${charId ? (isView ? "查看角色" : "编辑角色") : "创建角色"}</h1>
+          <div style="display:flex;gap:0.5rem">
+            ${charId && isView ? `<button class="btn btn-secondary btn-sm" onclick="forkFromHere()">复制为我的角色</button>` : ""}
+            <a href="/characters.html" class="btn btn-secondary">返回</a>
+          </div>
+        </div>
+        ${isView && charId ? `<p class="hint-banner">系统默认角色或他人角色仅可查看。想修改请点「复制为我的角色」。</p>` : ""}
+        <form id="char-form">
+          <div class="avatar-upload" id="avatar-section" style="${charId ? '' : 'display:none'}">
+            <div id="avatar-preview">${avatarImg('', '新')}</div>
+            <div>
+              <p style="margin-bottom:0.5rem;color:var(--text-muted);font-size:0.9rem">角色立绘 / 头像</p>
+              ${!isView ? `<label class="btn btn-secondary btn-sm"><input type="file" id="avatar-file" accept="image/jpeg,image/png,image/webp,image/gif">上传图片</label>
+              <p style="margin-top:0.35rem;font-size:0.75rem;color:var(--text-muted)">JPG / PNG / WebP / GIF，最大 5MB</p>` : ''}
+            </div>
+          </div>
+          <div class="grid" style="grid-template-columns:1fr 1fr">
+            <div class="form-group"><label>名称</label><input id="name" required ${isView?"readonly":""}></div>
+            <div class="form-group"><label>标签（逗号分隔）</label><input id="tags" ${isView?"readonly":""}></div>
+          </div>
+          <div class="form-group"><label>简介</label><textarea id="description" ${isView?"readonly":""}></textarea></div>
+          <div class="form-group"><label>系统 Prompt</label><textarea id="system_prompt" rows="3" ${isView?"readonly":""}></textarea></div>
+          <div class="form-group"><label>性格 (Personality)</label><textarea id="personality" rows="3" ${isView?"readonly":""}></textarea></div>
+          <div class="form-group"><label>场景 (Scenario)</label><textarea id="scenario" rows="3" ${isView?"readonly":""}></textarea></div>
+          <div class="form-group"><label>开场白 (First Message)</label><textarea id="first_mes" rows="3" ${isView?"readonly":""}></textarea></div>
+          <div class="form-group"><label>示例对话 (Mes Example)</label><textarea id="mes_example" rows="4" ${isView?"readonly":""}></textarea></div>
+          <div class="form-group"><label>历史后指令 (Post History)</label><textarea id="post_history_instructions" rows="3" ${isView?"readonly":""}></textarea></div>
+          <div class="form-group"><label>创作者备注（不进 prompt）</label><textarea id="creator_notes" rows="2" ${isView?"readonly":""}></textarea></div>
+          <div class="form-group"><label><input type="checkbox" id="is_public" ${isView?"disabled":""}> 公开角色</label></div>
+          <h3 style="margin:1.5rem 0 0.75rem">世界书 / Lorebook</h3>
+          <div id="lorebook-list"></div>
+          ${!isView ? `<button type="button" class="btn btn-secondary btn-sm" id="add-lore" style="margin-bottom:1rem">+ 添加条目</button>` : ""}
+          ${!isView ? `<button type="submit" class="btn btn-primary">保存</button>` : `<button type="button" class="btn btn-primary" id="start-chat-btn">开始对话</button>`}
+          <p id="msg" class="success-msg" style="display:none"></p>
+        </form>
+      `;
+      if (!isView) {
+        document.getElementById("add-lore").addEventListener("click", () => { lorebook.push({ keys: "", content: "", insert_order: 100, position: "before_char", enabled: true }); renderLore(isView); });
+        document.getElementById("char-form").addEventListener("submit", saveChar);
+        document.getElementById("avatar-file")?.addEventListener("change", uploadAvatar);
+      }
+      renderLore(isView);
+      document.getElementById("start-chat-btn")?.addEventListener("click", () => {
+        if (!currentCharData) return;
+        openChat(currentCharData.id, {
+          name: currentCharData.name,
+          avatar_url: currentCharData.avatar_url,
+          description: currentCharData.description || "",
+        });
+      });
+    }
+
+    function renderLore(isView) {
+      const el = document.getElementById("lorebook-list");
+      if (!el) return;
+      el.innerHTML = lorebook.map((e, i) => `
+        <div class="lore-entry">
+          <div class="grid" style="grid-template-columns:1fr 1fr;gap:0.5rem">
+            <div class="form-group"><label>触发关键词（逗号分隔）</label><input value="${escHtml(e.keys)}" onchange="lorebook[${i}].keys=this.value" ${isView?"readonly":""}></div>
+            <div class="form-group"><label>优先级</label><input type="number" value="${e.insert_order}" onchange="lorebook[${i}].insert_order=+this.value" ${isView?"readonly":""}></div>
+          </div>
+          <div class="form-group"><label>内容</label><textarea onchange="lorebook[${i}].content=this.value" ${isView?"readonly":""}>${escHtml(e.content)}</textarea></div>
+          ${!isView ? `<button type="button" class="btn btn-danger btn-sm" onclick="lorebook.splice(${i},1);renderLore(false)">删除</button>` : ""}
+        </div>`).join("");
+    }
+
+    async function forkFromHere() {
+      const c = await API.post(`/api/characters/${charId}/fork`);
+      location.href = `/character-edit.html?id=${c.id}`;
+    }
+
+    function fillChar(c) {
+      currentCharData = c;
+      for (const f of ["name","tags","description","system_prompt","personality","scenario","first_mes","mes_example","post_history_instructions","creator_notes"]) {
+        const el = document.getElementById(f);
+        if (el) el.value = c[f] || "";
+      }
+      document.getElementById("is_public").checked = c.is_public;
+      lorebook = c.lorebook_entries || [];
+      document.getElementById("avatar-preview").innerHTML = avatarImg(c.avatar_url, c.name, "avatar avatar-lg");
+    }
+
+    async function uploadAvatar(e) {
+      const file = e.target.files[0];
+      if (!file || !charId) return;
+      try {
+        const c = await API.uploadAvatar(charId, file);
+        document.getElementById("avatar-preview").innerHTML = avatarImg(c.avatar_url, c.name, "avatar avatar-lg");
+        const msg = document.getElementById("msg");
+        msg.textContent = "头像已更新"; msg.style.display = "block";
+      } catch (ex) { alert(ex.message); }
+      e.target.value = "";
+    }
+
+    async function saveChar(e) {
+      e.preventDefault();
+      const body = {
+        name: document.getElementById("name").value.trim(),
+        tags: document.getElementById("tags").value.trim(),
+        description: document.getElementById("description").value,
+        system_prompt: document.getElementById("system_prompt").value,
+        personality: document.getElementById("personality").value,
+        scenario: document.getElementById("scenario").value,
+        first_mes: document.getElementById("first_mes").value,
+        mes_example: document.getElementById("mes_example").value,
+        post_history_instructions: document.getElementById("post_history_instructions").value,
+        creator_notes: document.getElementById("creator_notes").value,
+        is_public: document.getElementById("is_public").checked,
+        lorebook_entries: lorebook,
+      };
+      try {
+        if (charId) await API.put(`/api/characters/${charId}`, body);
+        else { const c = await API.post("/api/characters", body); location.href = `/character-edit.html?id=${c.id}`; return; }
+        const msg = document.getElementById("msg");
+        msg.textContent = "保存成功"; msg.style.display = "block";
+      } catch (ex) { alert(ex.message); }
+    }
+
+    mountShell("characters");
+  </script>
+</body>
+</html>

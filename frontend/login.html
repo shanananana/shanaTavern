@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>登录 - TavernMixer</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="auth-page">
+    <div class="auth-box">
+      <h1>🍺 TavernMixer</h1>
+      <p class="subtitle">酒馆 AI 配料 · 登录</p>
+      <form id="login-form">
+        <div class="form-group">
+          <label>用户名</label>
+          <input type="text" id="username" required autocomplete="username">
+        </div>
+        <div class="form-group">
+          <label>密码</label>
+          <input type="password" id="password" required autocomplete="current-password">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%;margin-top:0.5rem">登录</button>
+        <p id="error" class="error-msg" style="display:none"></p>
+      </form>
+    </div>
+  </div>
+  <script src="/static/js/api.js?v=4"></script>
+  <script>
+    if (API.token) window.location.href = "/index.html";
+    document.getElementById("login-form").addEventListener("submit", async e => {
+      e.preventDefault();
+      const err = document.getElementById("error");
+      err.style.display = "none";
+      try {
+        const data = await API.post("/api/auth/login", {
+          username: document.getElementById("username").value.trim(),
+          password: document.getElementById("password").value,
+        });
+        API.token = data.access_token;
+        window.location.href = "/index.html";
+      } catch (ex) {
+        err.textContent = ex.message;
+        err.style.display = "block";
+      }
+    });
+  </script>
+</body>
+</html>

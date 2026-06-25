@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>发现 - TavernMixer</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="app-shell" id="app-shell"></div>
+  <script src="/static/js/api.js?v=4"></script>
+  <script>
+    let currentScope = new URLSearchParams(location.search).get("scope") || "cute";
+    let currentTag = "";
+    let searchQ = "";
+
+    window.onAppReady = async () => {
+      const main = document.getElementById("main-content");
+      const tags = await API.cachedGet("/api/characters/tags", 300000);
+      main.innerHTML = `
+        <div class="page-header">
+          <h1>发现角色</h1>
+          <button class="btn btn-primary btn-sm" id="random-btn">🎲 随机</button>
+        </div>
+        <div class="search-bar">
+          <input type="search" id="search-input" placeholder="搜索名字、简介、标签…">
+        </div>
+        <div class="tabs" id="scope-tabs">
+          <div class="tab" data-scope="cute">可爱</div>
+          <div class="tab" data-scope="female">女性</div>
+          <div class="tab" data-scope="default">默认</div>
+          <div class="tab" data-scope="all">全部</div>
+          <div class="tab" data-scope="favorites">收藏</div>
+        </div>
+        <div class="tag-filters" id="tag-filters"></div>
+        <div class="grid" id="char-grid"></div>
+      `;
+      const tagEl = document.getElementById("tag-filters");
+      tagEl.innerHTML = tags.map(t => `<button type="button" class="tag-filter" data-tag="${escHtml(t)}">${escHtml(t)}</button>`).join("");
+      document.querySelectorAll("#scope-tabs .tab").forEach(t => {
+        t.classList.toggle("active", t.dataset.scope === currentScope);
+        t.addEventListener("click", () => { currentScope = t.dataset.scope; syncTabs(); loadChars(); });
+      });
+      tagEl.querySelectorAll(".tag-filter").forEach(btn => {
+        btn.addEventListener("click", () => {
+          currentTag = currentTag === btn.dataset.tag ? "" : btn.dataset.tag;
+          tagEl.querySelectorAll(".tag-filter").forEach(b => b.classList.toggle("active", b.dataset.tag === currentTag));
+          loadChars();
+        });
+      });
+      let timer;
+      document.getElementById("search-input").addEventListener("input", e => {
+        clearTimeout(timer);
+        timer = setTimeout(() => { searchQ = e.target.value.trim(); loadChars(); }, 300);
+      });
+      document.getElementById("random-btn").addEventListener("click", async () => {
+        const c = await API.get(`/api/characters/random?scope=${currentScope}`);
+        openChat(c.id, { name: c.name, avatar_url: c.avatar_url, description: c.description || "" });
+      });
+      syncTabs();
+      loadChars();
+    };
+
+    function syncTabs() {
+      document.querySelectorAll("#scope-tabs .tab").forEach(x => x.classList.toggle("active", x.dataset.scope === currentScope));
+    }
+
+    async function loadChars() {
+      let url = `/api/characters?scope=${currentScope}`;
+      if (searchQ) url += `&q=${encodeURIComponent(searchQ)}`;
+      if (currentTag) url += `&tag=${encodeURIComponent(currentTag)}`;
+      const useCache = !searchQ && !currentTag;
+      const chars = useCache
+        ? await API.cachedGet(url, 120000)
+        : await API.get(url);
+      const grid = document.getElementById("char-grid");
+      if (!chars.length) { grid.innerHTML = `<div class="empty-state">没有匹配的角色</div>`; return; }
+      grid.innerHTML = chars.map(c => {
+        const tags = c.tags ? c.tags.split(",").map(t => `<span class="tag">${escHtml(t.trim())}</span>`).join("") : "";
+        return `<div class="card card-with-avatar">
+          ${avatarImg(c.avatar_url, c.name)}
+          <div class="card-body">
+            <h3>${escHtml(c.name)}</h3>
+            <p>${escHtml(c.description || "")}</p>${tags}
+            <div class="card-actions">
+              <button type="button" class="btn btn-primary btn-sm" onclick='openChat(${c.id}, ${JSON.stringify({ name: c.name, avatar_url: c.avatar_url, description: c.description || "" })})'>对话</button>
+              <a href="/character-edit.html?id=${c.id}&readonly=1" class="btn btn-secondary btn-sm">详情</a>
+            </div>
+          </div>
+        </div>`;
+      }).join("");
+    }
+
+    mountShell("discover");
+  </script>
+</body>
+</html>

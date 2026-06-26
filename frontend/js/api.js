@@ -12,6 +12,7 @@ const API = {
 
   _cache: new Map(),
   _inflight: new Map(),
+  streamTimeoutMs: 180000,
 
   _cacheKey(path) {
     return `${this.token || "anon"}:${path}`;
@@ -88,6 +89,11 @@ const API = {
   put(path, body) { return this.request(path, { method: "PUT", body: JSON.stringify(body) }); },
   delete(path) { return this.request(path, { method: "DELETE" }); },
 
+  async fetchCharacters(path, ttlMs = 120000, useCache = true) {
+    const data = useCache ? await this.cachedGet(path, ttlMs) : await this.get(path);
+    return normalizeCharacterPage(data);
+  },
+
   async uploadAvatar(characterId, file) {
     const form = new FormData();
     form.append("file", file);
@@ -110,11 +116,30 @@ const API = {
     return data;
   },
 
-  async stream(path, body, onToken, onDone, onError) {
+  async stream(path, body, onToken, onDone, onError, timeoutMs) {
+    const limit = timeoutMs ?? this.streamTimeoutMs;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), limit);
     const headers = { "Content-Type": "application/json" };
     if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
-    const res = await fetch(path, { method: "POST", headers, body: JSON.stringify(body) });
+    let res;
+    try {
+      res = await fetch(path, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timer);
+      if (err.name === "AbortError") {
+        onError(`请求超时（${Math.round(limit / 1000)}s），请重试`);
+        return;
+      }
+      throw err;
+    }
     if (!res.ok) {
+      clearTimeout(timer);
       const err = await res.text();
       throw new Error(err || res.statusText);
     }
@@ -122,23 +147,39 @@ const API = {
     const decoder = new TextDecoder();
     let buffer = "";
     let gotDone = false;
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        try {
-          const evt = JSON.parse(line.slice(6));
-          if (evt.type === "token") onToken(evt.content);
-          else if (evt.type === "done") { gotDone = true; onDone(evt.message); }
-          else if (evt.type === "error") onError(evt.content);
-        } catch (_) { /* skip */ }
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const evt = JSON.parse(line.slice(6));
+            if (evt.type === "token") {
+              onToken(evt.content);
+            } else if (evt.type === "done") {
+              gotDone = true;
+              onDone(evt.message);
+            } else if (evt.type === "error") {
+              onError(evt.content);
+            }
+          } catch (_) { /* skip */ }
+        }
       }
+    } catch (err) {
+      if (err.name === "AbortError") {
+        onError(`请求超时（${Math.round(limit / 1000)}s），请重试`);
+      } else {
+        throw err;
+      }
+    } finally {
+      clearTimeout(timer);
+      controller.abort();
     }
-    if (!gotDone) onError("模型未返回内容，请确认 LM Studio 已加载 Huihui 模型");
+    if (!gotDone) onError("模型未返回内容，请确认 LM Studio 已加载模型");
   },
 };
 
@@ -192,10 +233,18 @@ function applyBootstrap(data) {
   }
   _writeCachedUser(data.user);
   if (Array.isArray(data.characters)) {
-    API.seedCache("/api/characters", data.characters, 120000);
+    const page = {
+      items: data.characters,
+      total: data.characters.length,
+      page: 1,
+      page_size: data.characters.length,
+      has_more: false,
+    };
+    API.seedCache("/api/characters", page, 120000);
   }
   if (Array.isArray(data.sessions)) {
     API.seedCache("/api/chat/sessions", data.sessions, 30000);
+    ChatSessionStore.syncFromApiSessions(data.sessions);
   }
   window._bootstrap = data;
   return data.user;
@@ -206,7 +255,9 @@ async function fetchBootstrap() {
     const data = await API.cachedGet("/api/bootstrap", 60000);
     return applyBootstrap(data);
   } catch (err) {
-    console.warn("bootstrap failed, fallback to auth", err);
+    if (typeof console !== "undefined" && console.warn) {
+      console.warn("bootstrap failed, fallback to auth", err);
+    }
     API.clearCache("/api/bootstrap");
     return requireAuth();
   }
@@ -230,7 +281,7 @@ function loadMobileChat() {
   if (_mobileChatLoading) return _mobileChatLoading;
   _mobileChatLoading = new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "/static/js/mobile-chat.js";
+    script.src = "/static/js/mobile-chat.js?v=6";
     script.onload = () => resolve();
     script.onerror = () => reject(new Error("mobile-chat load failed"));
     document.head.appendChild(script);
@@ -238,97 +289,6 @@ function loadMobileChat() {
   return _mobileChatLoading;
 }
 
-function escHtml(s) {
-  const d = document.createElement("div");
-  d.textContent = s;
-  return d.innerHTML;
-}
-
-/** 后端 datetime.utcnow 无时区标记，按 UTC 解析后转本地显示 */
-function parseApiTime(iso) {
-  if (!iso) return null;
-  if (typeof iso !== "string") return new Date(iso);
-  const s = iso.trim();
-  if (!s) return null;
-  if (/[zZ]$/.test(s) || /[+-]\d{2}:\d{2}$/.test(s)) return new Date(s);
-  return new Date(`${s}Z`);
-}
-
-function formatDateTime(iso) {
-  const d = parseApiTime(iso);
-  if (!d || Number.isNaN(d.getTime())) return iso || "";
-  return d.toLocaleString("zh-CN", { hour12: false });
-}
-
-/** 酒馆式对话文案：*动作* 斜体、段落间距、换行 */
-function formatChatContent(text) {
-  if (!text) return "";
-  const safe = escHtml(text.trim());
-  return safe
-    .split(/\n{2,}/)
-    .map((block) => {
-      let line = block.replace(/\*([^*\n]+)\*/g, '<em class="msg-action">$1</em>');
-      line = line.replace(/「([^」]+)」/g, '<span class="msg-quote">「$1」</span>');
-      line = line.replace(/\n/g, "<br>");
-      return `<p class="msg-para">${line}</p>`;
-    })
-    .join("");
-}
-
-function renderChatBubble({ role, content, char, userLabel, streaming = false }) {
-  const isUser = role === "user";
-  const label = isUser ? (userLabel || "你") : (char?.name || "角色");
-  const body = streaming
-    ? `<span class="stream-content"></span><span class="stream-cursor" aria-hidden="true"></span>`
-    : formatChatContent(content);
-  const avatar = !isUser && char
-    ? avatarImg(char.avatar_url, char.name, "avatar avatar-sm msg-avatar")
-    : "";
-  const streamClass = streaming ? " msg-streaming" : "";
-  return `<div class="msg ${role}${streamClass}">
-    ${avatar}
-    <div class="msg-body">
-      <div class="role-label">${escHtml(label)}</div>
-      <div class="msg-content">${body}</div>
-    </div>
-  </div>`;
-}
-
-function avatarImg(url, name, cls = "avatar", priority = false) {
-  const letter = escHtml((name || "?").charAt(0));
-  if (url) {
-    const load = priority ? "eager" : "lazy";
-    const pri = priority ? ' fetchpriority="high"' : "";
-    return `<img class="${cls}" src="${escHtml(url)}" alt="${letter}" loading="${load}" decoding="async"${pri}>`;
-  }
-  return `<div class="${cls} avatar-fallback">${letter}</div>`;
-}
-
-function isMobileLayout() {
-  return window.matchMedia("(max-width: 768px)").matches;
-}
-
-/** 可爱度排序：带「可爱」标签优先，软萌/兽耳等加成，御姐/男性靠后 */
-function cutenessScore(tags) {
-  const parts = new Set((tags || "").split(",").map(t => t.trim()).filter(Boolean));
-  let score = 0;
-  if (parts.has("可爱")) score += 1000;
-  for (const [i, tag] of ["软萌", "兽耳", "女仆", "元气", "治愈", "校园", "偶像", "甜点", "傲娇", "俏皮", "慵懒"].entries()) {
-    if (parts.has(tag)) score += 50 - i;
-  }
-  for (const tag of ["御姐", "冷淡", "严肃", "霸道总裁", "痞气", "佣兵", "剑客"]) {
-    if (parts.has(tag)) score -= 80;
-  }
-  if (parts.has("男性")) score -= 200;
-  return score;
-}
-
-function sortByCuteness(list) {
-  if (!Array.isArray(list)) return [];
-  return [...list].sort((a, b) => cutenessScore(b.tags) - cutenessScore(a.tags) || a.id - b.id);
-}
-
-/** 跳转对话页；手机端走同页浮层（mobile-chat.js 提供 MobileChat） */
 function openChat(charId, meta) {
   if (isMobileLayout()) {
     loadMobileChat().then(() => {

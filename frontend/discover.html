@@ -8,11 +8,17 @@
 </head>
 <body>
   <div class="app-shell" id="app-shell"></div>
-  <script src="/static/js/api.js?v=5"></script>
+  <script src="/static/js/utils.js?v=6"></script>
+  <script src="/static/js/chat-core.js?v=6"></script>
+  <script src="/static/js/api.js?v=6"></script>
   <script>
     let currentScope = new URLSearchParams(location.search).get("scope") || "cute";
     let currentTag = "";
     let searchQ = "";
+    let currentPage = 1;
+    let hasMore = false;
+    let loadedItems = [];
+    const PAGE_SIZE = 50;
 
     window.onAppReady = async () => {
       const main = document.getElementById("main-content");
@@ -34,48 +40,60 @@
         </div>
         <div class="tag-filters" id="tag-filters"></div>
         <div class="grid" id="char-grid"></div>
+        <div id="load-more-wrap" style="text-align:center;margin:1.5rem 0;display:none">
+          <button class="btn btn-secondary" id="load-more-btn">加载更多</button>
+        </div>
       `;
       const tagEl = document.getElementById("tag-filters");
       tagEl.innerHTML = tags.map(t => `<button type="button" class="tag-filter" data-tag="${escHtml(t)}">${escHtml(t)}</button>`).join("");
       document.querySelectorAll("#scope-tabs .tab").forEach(t => {
         t.classList.toggle("active", t.dataset.scope === currentScope);
-        t.addEventListener("click", () => { currentScope = t.dataset.scope; syncTabs(); loadChars(); });
+        t.addEventListener("click", () => { currentScope = t.dataset.scope; syncTabs(); loadChars(true); });
       });
       tagEl.querySelectorAll(".tag-filter").forEach(btn => {
         btn.addEventListener("click", () => {
           currentTag = currentTag === btn.dataset.tag ? "" : btn.dataset.tag;
           tagEl.querySelectorAll(".tag-filter").forEach(b => b.classList.toggle("active", b.dataset.tag === currentTag));
-          loadChars();
+          loadChars(true);
         });
       });
+      document.getElementById("load-more-btn").addEventListener("click", () => loadChars(false));
       let timer;
       document.getElementById("search-input").addEventListener("input", e => {
         clearTimeout(timer);
-        timer = setTimeout(() => { searchQ = e.target.value.trim(); loadChars(); }, 300);
+        timer = setTimeout(() => { searchQ = e.target.value.trim(); loadChars(true); }, 300);
       });
       document.getElementById("random-btn").addEventListener("click", async () => {
         const c = await API.get(`/api/characters/random?scope=${currentScope}`);
         openChat(c.id, { name: c.name, avatar_url: c.avatar_url, description: c.description || "" });
       });
       syncTabs();
-      loadChars();
+      loadChars(true);
     };
 
     function syncTabs() {
       document.querySelectorAll("#scope-tabs .tab").forEach(x => x.classList.toggle("active", x.dataset.scope === currentScope));
     }
 
-    async function loadChars() {
-      let url = `/api/characters?scope=${currentScope}`;
+    async function loadChars(reset = true) {
+      if (reset) { currentPage = 1; loadedItems = []; }
+      else currentPage += 1;
+      let url = `/api/characters?scope=${currentScope}&page=${currentPage}&page_size=${PAGE_SIZE}`;
       if (searchQ) url += `&q=${encodeURIComponent(searchQ)}`;
       if (currentTag) url += `&tag=${encodeURIComponent(currentTag)}`;
-      const useCache = !searchQ && !currentTag;
-      const chars = useCache
-        ? await API.cachedGet(url, 120000)
-        : await API.get(url);
+      const useCache = !searchQ && !currentTag && currentPage === 1;
+      const page = useCache
+        ? await API.fetchCharacters(url, 120000)
+        : normalizeCharacterPage(await API.get(url));
+      loadedItems = reset ? page.items : loadedItems.concat(page.items);
+      hasMore = page.has_more;
       const grid = document.getElementById("char-grid");
-      if (!chars.length) { grid.innerHTML = `<div class="empty-state">没有匹配的角色</div>`; return; }
-      grid.innerHTML = chars.map(c => {
+      if (!loadedItems.length) {
+        grid.innerHTML = `<div class="empty-state">没有匹配的角色</div>`;
+        document.getElementById("load-more-wrap").style.display = "none";
+        return;
+      }
+      grid.innerHTML = loadedItems.map(c => {
         const tags = c.tags ? c.tags.split(",").map(t => `<span class="tag">${escHtml(t.trim())}</span>`).join("") : "";
         return `<div class="card card-with-avatar">
           ${avatarImg(c.avatar_url, c.name)}
@@ -89,6 +107,7 @@
           </div>
         </div>`;
       }).join("");
+      document.getElementById("load-more-wrap").style.display = hasMore ? "block" : "none";
     }
 
     mountShell("discover");

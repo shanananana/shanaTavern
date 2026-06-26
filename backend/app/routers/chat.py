@@ -1,4 +1,8 @@
+from __future__ import annotations
+
+import asyncio
 import json
+import logging
 import random
 from collections.abc import AsyncIterator
 
@@ -10,10 +14,14 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.models import Character, ChatMessage, ChatSession, User
 from app.schemas import ChatSendRequest, MessageOut, SessionCreate, SessionOut
+from app.services.bootstrap_cache import invalidate as invalidate_bootstrap
 from app.services.llm import LLMError, chat_completion_stream
 from app.services.prompt_builder import build_chat_messages
+from app.stream_tracker import begin_stream, end_stream
+from config import settings
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
+logger = logging.getLogger(__name__)
 
 
 def _pick_greeting(character: Character) -> str:
@@ -91,6 +99,7 @@ def create_session(
         )
     db.commit()
     db.refresh(session)
+    invalidate_bootstrap(user.id)
     out = SessionOut.model_validate(session)
     out.character_name = character.name
     return out
@@ -115,6 +124,7 @@ def delete_session(
     session = _get_session(db, session_id, user)
     db.delete(session)
     db.commit()
+    invalidate_bootstrap(user.id)
     return {"ok": True}
 
 
@@ -158,17 +168,47 @@ async def send_message(
         db.commit()
         db.refresh(session)
 
+    idle_timeout = settings.llm_stream_idle_timeout
+
     async def event_stream() -> AsyncIterator[bytes]:
         full_parts: list[str] = []
+        await begin_stream()
         try:
-            async for token in chat_completion_stream(llm_messages):
+            token_iter = chat_completion_stream(llm_messages).__aiter__()
+            while True:
+                try:
+                    token = await asyncio.wait_for(
+                        token_iter.__anext__(),
+                        timeout=idle_timeout,
+                    )
+                except StopAsyncIteration:
+                    break
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "LLM stream idle timeout session=%s user=%s",
+                        session_id,
+                        user.id,
+                    )
+                    err = json.dumps(
+                        {
+                            "type": "error",
+                            "content": f"模型响应超时（{int(idle_timeout)}s 无输出），请重试",
+                        },
+                        ensure_ascii=False,
+                    )
+                    yield f"data: {err}\n\n".encode()
+                    return
+
                 full_parts.append(token)
                 payload = json.dumps({"type": "token", "content": token}, ensure_ascii=False)
                 yield f"data: {payload}\n\n".encode()
         except LLMError as exc:
+            logger.error("LLM error session=%s: %s", session_id, exc)
             err = json.dumps({"type": "error", "content": str(exc)}, ensure_ascii=False)
             yield f"data: {err}\n\n".encode()
             return
+        finally:
+            await end_stream()
 
         assistant_text = "".join(full_parts)
         if not assistant_text.strip():
@@ -182,6 +222,7 @@ async def send_message(
         db.add(msg)
         db.commit()
         db.refresh(msg)
+        invalidate_bootstrap(user.id)
         done = json.dumps(
             {"type": "done", "message": MessageOut.model_validate(msg).model_dump(mode="json")},
             ensure_ascii=False,
@@ -202,6 +243,7 @@ def clear_messages(
     for msg in list(session.messages):
         db.delete(msg)
     db.commit()
+    invalidate_bootstrap(user.id)
     return {"ok": True}
 
 
@@ -218,4 +260,5 @@ def delete_message(
         raise HTTPException(status_code=404, detail="消息不存在")
     db.delete(msg)
     db.commit()
+    invalidate_bootstrap(user.id)
     return {"ok": True}

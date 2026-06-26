@@ -1,11 +1,10 @@
 from sqlalchemy.orm import Session
 
 from app.auth import hash_password
-from app.batch50_characters import batch50_for_seed
 from app.models import Character, Ingredient, User
 from config import settings
 
-DEFAULT_CHARACTERS = [
+HAND_WRITTEN_CHARACTERS = [
     {
         "name": "猫耳女仆喵喵",
         "avatar_url": "/uploads/defaults/miao.png",
@@ -150,8 +149,6 @@ DEFAULT_CHARACTERS = [
     },
 ]
 
-DEFAULT_CHARACTERS.extend(batch50_for_seed())
-
 SYSTEM_INGREDIENTS = [
     ("温柔治愈", "personality", "说话轻柔，善于安慰，常用温暖的比喻。"),
     ("高冷毒舌", "personality", "外冷内热，偶尔吐槽但不伤人。"),
@@ -173,8 +170,15 @@ SYSTEM_INGREDIENTS = [
 ]
 
 
+def _default_characters() -> list[dict]:
+    from app.batch50_characters import batch50_for_seed
+
+    return HAND_WRITTEN_CHARACTERS + batch50_for_seed()
+
+
 def _sync_default_characters(db: Session) -> None:
-    by_name = {c["name"]: c for c in DEFAULT_CHARACTERS}
+    defaults = _default_characters()
+    by_name = {c["name"]: c for c in defaults}
     existing = {
         c.name: c
         for c in db.query(Character).filter(Character.is_default.is_(True)).all()

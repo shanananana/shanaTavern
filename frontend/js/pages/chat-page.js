@@ -1,0 +1,296 @@
+let currentSessionId = null;
+let currentCharId = null;
+let streaming = false;
+let charMap = {};
+let sessionsCache = [];
+let currentUser = null;
+let sessionsDrawerOpen = false;
+
+function userLabel() {
+  return currentUser?.nickname || currentUser?.username || "你";
+}
+
+function currentChar() {
+  return currentCharId ? charMap[currentCharId] : null;
+}
+
+function scrollMessagesToBottom() {
+  const el = document.getElementById("messages");
+  if (el) el.scrollTop = el.scrollHeight;
+}
+
+function setActiveSession(sessionId) {
+  currentSessionId = sessionId;
+  document.querySelectorAll(".session-item").forEach(item => {
+    item.classList.toggle("active", +item.dataset.id === sessionId);
+  });
+}
+
+function readPrefill(charId) {
+  try {
+    const raw = sessionStorage.getItem("st_chat_prefill");
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (+data.id === +charId) return data;
+  } catch (_) {}
+  return null;
+}
+
+function applyPrefillHeader(charId) {
+  const pre = readPrefill(charId) || charMap[charId];
+  if (!pre) return;
+  charMap[charId] = { ...charMap[charId], ...pre, id: +charId };
+  updateChatHeader(charId);
+  const title = document.getElementById("chat-mobile-title");
+  if (title) title.textContent = pre.name || "对话";
+}
+
+function toggleSessionsDrawer(force) {
+  sessionsDrawerOpen = force !== undefined ? force : !sessionsDrawerOpen;
+  document.getElementById("session-list-wrap")?.classList.toggle("open", sessionsDrawerOpen);
+  document.getElementById("session-backdrop")?.classList.toggle("open", sessionsDrawerOpen);
+}
+
+window.onAppReady = async (user) => {
+  currentUser = user;
+  const mobile = isMobileLayout();
+  const main = document.getElementById("main-content");
+  const preCharId = new URLSearchParams(location.search).get("character_id");
+  if (preCharId) {
+    currentCharId = +preCharId;
+    applyPrefillHeader(+preCharId);
+  }
+
+  main.innerHTML = `
+    ${mobile ? `
+    <div class="chat-mobile-bar">
+      <button type="button" class="btn-icon" id="chat-back" aria-label="返回">←</button>
+      <div class="chat-mobile-title" id="chat-mobile-title">${escHtml(charMap[currentCharId]?.name || "对话")}</div>
+      <button type="button" class="btn-icon" id="chat-sessions-toggle" aria-label="对话列表">☰</button>
+    </div>
+    <div class="session-backdrop" id="session-backdrop"></div>` : `
+    <div class="page-header chat-page-header">
+      <h1>对话</h1>
+      <select id="char-select" class="chat-char-select"></select>
+      <button class="btn btn-primary btn-sm" id="new-session-btn">新对话</button>
+      <button class="btn btn-secondary btn-sm" id="clear-btn" title="清空当前对话">清空</button>
+    </div>`}
+    <div class="chat-layout${mobile ? " chat-layout-mobile" : ""}">
+      <div class="chat-sidebar${mobile ? " session-drawer" : ""}" id="session-list-wrap">
+        ${mobile ? `<div class="session-drawer-head"><strong>对话列表</strong><button type="button" class="btn-icon" id="session-drawer-close">×</button></div>` : ""}
+        <div id="session-list"></div>
+      </div>
+      <div class="chat-main">
+        <div class="chat-header" id="chat-header"></div>
+        <div class="chat-messages" id="messages">
+          <div class="chat-messages-empty">加载中…</div>
+        </div>
+        <div class="chat-input-bar">
+          <textarea id="user-input" placeholder="输入消息…" rows="1" enterkeyhint="send"></textarea>
+          <button class="btn btn-primary" id="send-btn">发送</button>
+          <button class="btn btn-secondary btn-sm" id="regen-btn" title="重新生成">↻</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  if (mobile) {
+    document.getElementById("chat-back").addEventListener("click", () => history.back());
+    document.getElementById("chat-sessions-toggle").addEventListener("click", () => toggleSessionsDrawer(true));
+    document.getElementById("session-drawer-close")?.addEventListener("click", () => toggleSessionsDrawer(false));
+    document.getElementById("session-backdrop")?.addEventListener("click", () => toggleSessionsDrawer(false));
+  } else {
+    document.getElementById("new-session-btn").addEventListener("click", () => createSession(+document.getElementById("char-select").value));
+    document.getElementById("clear-btn").addEventListener("click", clearChat);
+  }
+
+  document.getElementById("send-btn").addEventListener("click", sendMsg);
+  document.getElementById("regen-btn").addEventListener("click", regenMsg);
+  document.getElementById("user-input").addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMsg(); }
+  });
+  bindMobileChatViewport(document.getElementById("user-input"));
+
+  const charPage = await API.fetchCharacters("/api/characters", 120000);
+  charPage.items.forEach(c => { charMap[c.id] = c; });
+  if (!mobile) {
+    const sel = document.getElementById("char-select");
+    charPage.items.forEach(c => {
+      const o = document.createElement("option");
+      o.value = c.id;
+      o.textContent = c.name;
+      sel.appendChild(o);
+    });
+    if (preCharId) sel.value = preCharId;
+    sel.addEventListener("change", () => { currentCharId = +sel.value; updateChatHeader(currentCharId); });
+  }
+  if (preCharId) applyPrefillHeader(+preCharId);
+
+  if (preCharId) {
+    await openCharacterChat(+preCharId);
+  } else {
+    await loadSessions();
+    if (sessionsCache.length) {
+      setActiveSession(sessionsCache[0].id);
+      await loadMessages(sessionsCache[0].id);
+    } else {
+      document.getElementById("messages").innerHTML = `<div class="chat-messages-empty">选择角色开始对话</div>`;
+    }
+  }
+};
+
+function updateChatHeader(charId) {
+  const c = charMap[charId];
+  const el = document.getElementById("chat-header");
+  const title = document.getElementById("chat-mobile-title");
+  if (title && c) title.textContent = c.name;
+  if (!el || !c) { if (el) el.innerHTML = ""; return; }
+  el.innerHTML = `${avatarImg(c.avatar_url, c.name, "avatar avatar-sm")}<div class="chat-header-text"><strong>${escHtml(c.name)}</strong><div class="chat-header-desc">${escHtml(c.description || "")}</div></div>`;
+}
+
+function renderSessionList() {
+  const el = document.getElementById("session-list");
+  if (!el) return;
+  if (!sessionsCache.length) {
+    el.innerHTML = `<div class="empty-state" style="padding:1.5rem;font-size:0.85rem">暂无对话</div>`;
+    return;
+  }
+  el.innerHTML = sessionsCache.map(s => `
+    <div class="session-item ${s.id === currentSessionId ? "active" : ""}" data-id="${s.id}" data-char="${s.character_id}">
+      <strong>${escHtml(s.character_name)}</strong><br>
+      <small style="color:var(--text-muted)">${escHtml(s.title)}</small>
+    </div>`).join("");
+  el.querySelectorAll(".session-item").forEach(item => {
+    item.addEventListener("click", async () => {
+      setActiveSession(+item.dataset.id);
+      currentCharId = +item.dataset.char;
+      updateChatHeader(currentCharId);
+      toggleSessionsDrawer(false);
+      await loadMessages(currentSessionId);
+    });
+  });
+}
+
+async function loadSessions(force = false) {
+  if (force || !sessionsCache.length) {
+    const cached = ChatSessionStore.readCachedSessions(30000);
+    sessionsCache = cached || await API.cachedGet("/api/chat/sessions", 30000);
+    ChatSessionStore.syncFromApiSessions(sessionsCache);
+  }
+  renderSessionList();
+  return sessionsCache;
+}
+
+async function openCharacterChat(charId) {
+  currentCharId = charId;
+  updateChatHeader(charId);
+  const storedId = ChatSessionStore.getSessionId(charId);
+  if (storedId) {
+    await loadSessions();
+    const match = sessionsCache.find(s => s.id === storedId);
+    if (match) {
+      setActiveSession(match.id);
+      await loadMessages(match.id);
+      return;
+    }
+  }
+  await loadSessions();
+  const existing = sessionsCache.find(s => s.character_id === charId);
+  if (existing) {
+    setActiveSession(existing.id);
+    ChatSessionStore.setSessionId(charId, existing.id);
+    await loadMessages(existing.id);
+    return;
+  }
+  await createSession(charId);
+}
+
+async function createSession(charId) {
+  document.getElementById("messages").innerHTML = `<div class="chat-messages-empty">正在连接 ${escHtml(charMap[charId]?.name || "角色")}…</div>`;
+  const s = await API.post("/api/chat/sessions", { character_id: charId });
+  currentSessionId = s.id;
+  currentCharId = charId;
+  ChatSessionStore.setSessionId(charId, s.id);
+  updateChatHeader(charId);
+  sessionsCache = [];
+  await loadSessions(true);
+  await loadMessages(currentSessionId);
+}
+
+async function loadMessages(sessionId) {
+  const session = sessionsCache.find(s => s.id === sessionId);
+  if (session) {
+    currentCharId = session.character_id;
+    updateChatHeader(session.character_id);
+  }
+  const msgs = await API.get(`/api/chat/sessions/${sessionId}/messages`);
+  const el = document.getElementById("messages");
+  const char = currentChar();
+  if (!msgs.length) {
+    el.innerHTML = `<div class="chat-messages-empty">与 ${escHtml(char?.name || "角色")} 的对话开始了<br><span class="chat-hint">*动作* 会显示为斜体</span></div>`;
+    return;
+  }
+  el.innerHTML = msgs.map(m => renderChatBubble({
+    role: m.role,
+    content: m.content,
+    char: m.role === "assistant" ? char : null,
+    userLabel: userLabel(),
+  })).join("");
+  scrollMessagesToBottom();
+}
+
+async function sendMsg() {
+  if (streaming || !currentSessionId) return;
+  const input = document.getElementById("user-input");
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  streaming = true;
+  document.getElementById("send-btn").disabled = true;
+
+  const el = document.getElementById("messages");
+  el.querySelector(".chat-messages-empty")?.remove();
+  el.insertAdjacentHTML("beforeend", renderChatBubble({
+    role: "user",
+    content: text,
+    userLabel: userLabel(),
+  }));
+
+  await streamChatMessage({
+    sessionId: currentSessionId,
+    body: { content: text },
+    messagesEl: el,
+    char: currentChar(),
+    onComplete: () => {
+      streaming = false;
+      document.getElementById("send-btn").disabled = false;
+    },
+  });
+}
+
+async function clearChat() {
+  if (!currentSessionId || !confirm("清空当前对话记录？")) return;
+  await API.delete(`/api/chat/sessions/${currentSessionId}/messages`);
+  await loadMessages(currentSessionId);
+}
+
+async function regenMsg() {
+  if (streaming || !currentSessionId) return;
+  streaming = true;
+  document.getElementById("send-btn").disabled = true;
+  const msgsEl = document.getElementById("messages");
+  [...msgsEl.querySelectorAll(".msg.assistant")].pop()?.remove();
+
+  await streamChatMessage({
+    sessionId: currentSessionId,
+    body: { content: "", regenerate: true },
+    messagesEl: msgsEl,
+    char: currentChar(),
+    onComplete: () => {
+      streaming = false;
+      document.getElementById("send-btn").disabled = false;
+    },
+  });
+}
+
+mountShell("chat");

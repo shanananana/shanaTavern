@@ -117,6 +117,14 @@ class CharacterListItem(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CharacterListPage(BaseModel):
+    items: list[CharacterListItem]
+    total: int
+    page: int
+    page_size: int
+    has_more: bool
+
+
 # ── Ingredient ────────────────────────────────────────────────────────────────
 
 class IngredientBase(BaseModel):

@@ -5,12 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>首页 - shanaTavern</title>
   <link rel="preload" href="/static/css/style.css" as="style">
-  <link rel="preload" href="/static/js/api.js?v=5" as="script">
+  <link rel="preload" href="/static/js/utils.js?v=6" as="script">
+  <link rel="preload" href="/static/js/api.js?v=6" as="script">
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
   <div class="app-shell" id="app-shell"></div>
-  <script src="/static/js/api.js?v=5"></script>
+  <script src="/static/js/utils.js?v=6"></script>
+  <script src="/static/js/chat-core.js?v=6"></script>
+  <script src="/static/js/api.js?v=6"></script>
   <script>
     function charCard(c, compact, priority) {
       const tags = c.tags ? c.tags.split(",").slice(0, 4).map(t => `<span class="tag">${escHtml(t.trim())}</span>`).join("") : "";
@@ -34,7 +37,8 @@
       btn.textContent = r.favorited ? "♥" : "♡";
       const chars = API._cache.get(API._cacheKey("/api/characters"));
       if (chars?.data) {
-        const item = chars.data.find(c => c.id === id);
+        const items = characterItems(chars.data);
+        const item = items.find(c => c.id === id);
         if (item) item.is_favorited = r.favorited;
       }
     }

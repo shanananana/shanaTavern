@@ -57,5 +57,12 @@ class Settings(BaseSettings):
     seed_admin_username: str = "admin"
     seed_admin_password: str = "changeme"
 
+    log_level: str = "INFO"
+    llm_connect_timeout: float = 10.0
+    llm_read_timeout: float = 120.0
+    llm_stream_idle_timeout: float = 90.0
+    bootstrap_cache_ttl: int = 60
+    shutdown_grace_seconds: float = 10.0
+
 
 settings = Settings()

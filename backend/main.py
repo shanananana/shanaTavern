@@ -1,3 +1,6 @@
+import asyncio
+import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -9,13 +12,17 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 
 from app.database import Base, SessionLocal, engine, migrate_schema
+from app.logging_config import setup_logging
 from app.routers import admin, auth, bootstrap, characters, chat, ingredients, internal_ops
 from app.seed import seed_database
 from app.services.avatar_images import ensure_all_default_thumbs
+from app.stream_tracker import active_stream_count
 from config import ROOT_DIR, settings
 
 FRONTEND_DIR = ROOT_DIR / "frontend"
 INTERNAL_OPS_PAGE = FRONTEND_DIR / "internal" / "ops.html"
+
+logger = logging.getLogger(__name__)
 
 
 class CacheControlMiddleware(BaseHTTPMiddleware):
@@ -29,8 +36,26 @@ class CacheControlMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class RequestLogMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        start = time.perf_counter()
+        response = await call_next(request)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        if not request.url.path.startswith("/static/"):
+            logger.info(
+                "%s %s %s %.1fms",
+                request.method,
+                request.url.path,
+                response.status_code,
+                elapsed_ms,
+            )
+        return response
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    setup_logging(settings.log_level)
+    logger.info("Starting shanaTavern")
     Base.metadata.create_all(bind=engine)
     migrate_schema()
     db = SessionLocal()
@@ -38,13 +63,29 @@ async def lifespan(_: FastAPI):
         seed_database(db)
     finally:
         db.close()
-    ensure_all_default_thumbs()
+    thumb_count = ensure_all_default_thumbs()
+    if thumb_count:
+        logger.info("Generated %d default avatar thumbnails", thumb_count)
     yield
+    logger.info("Graceful shutdown initiated")
+    deadline = time.monotonic() + settings.shutdown_grace_seconds
+    while time.monotonic() < deadline:
+        remaining = await active_stream_count()
+        if remaining == 0:
+            break
+        logger.info("Waiting for %d active stream(s)...", remaining)
+        await asyncio.sleep(0.25)
+    remaining = await active_stream_count()
+    if remaining:
+        logger.warning("Shutdown with %d active stream(s) still running", remaining)
+    else:
+        logger.info("All streams completed, shutdown ready")
 
 
 app = FastAPI(title="shanaTavern", description="本地 AI 角色扮演酒馆", lifespan=lifespan)
 
 app.add_middleware(GZipMiddleware, minimum_size=500)
+app.add_middleware(RequestLogMiddleware)
 app.add_middleware(CacheControlMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -125,9 +166,11 @@ def html_pages(page_name: str):
 if __name__ == "__main__":
     import uvicorn
 
+    setup_logging(settings.log_level)
     uvicorn.run(
         "main:app",
         host=settings.host,
         port=settings.port,
         reload=True,
+        timeout_graceful_shutdown=int(settings.shutdown_grace_seconds),
     )

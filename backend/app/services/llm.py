@@ -12,12 +12,21 @@ class LLMError(Exception):
     pass
 
 
+def _llm_timeout() -> httpx.Timeout:
+    return httpx.Timeout(
+        connect=settings.llm_connect_timeout,
+        read=settings.llm_read_timeout,
+        write=settings.llm_connect_timeout,
+        pool=settings.llm_connect_timeout,
+    )
+
+
 async def list_models() -> list[str]:
     url = f"{settings.llm_base_url.rstrip('/')}/models"
     headers = {}
     if settings.llm_api_key:
         headers["Authorization"] = f"Bearer {settings.llm_api_key}"
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=_llm_timeout()) as client:
         resp = await client.get(url, headers=headers)
         resp.raise_for_status()
         data = resp.json()
@@ -49,7 +58,7 @@ async def chat_completion_stream(
         "stream": True,
     }
 
-    async with httpx.AsyncClient(timeout=300.0) as client:
+    async with httpx.AsyncClient(timeout=_llm_timeout()) as client:
         async with client.stream("POST", url, headers=headers, json=payload) as resp:
             if resp.status_code != 200:
                 body = await resp.aread()

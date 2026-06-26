@@ -12,6 +12,16 @@
   --success: #5ac98a;
   --radius: 10px;
   --font: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --space-xs: 0.25rem;
+  --space-sm: 0.5rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2rem;
+  --sidebar-width: 220px;
+  --bottom-nav-height: 4.5rem;
+  --chat-input-min-height: 42px;
+  --z-overlay: 500;
+  --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.25);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -31,7 +41,7 @@ a:hover { text-decoration: underline; }
 .app-shell { display: flex; min-height: 100vh; }
 
 .sidebar {
-  width: 220px;
+  width: var(--sidebar-width);
   background: var(--bg-card);
   border-right: 1px solid var(--border);
   padding: 1.5rem 1rem;
@@ -580,11 +590,23 @@ textarea { min-height: 100px; resize: vertical; }
 
 .mobile-chat-input textarea {
   font-size: 16px;
-  min-height: 42px;
+  min-height: var(--chat-input-min-height);
 }
 
 body.mobile-chat-open {
   overflow: hidden;
+  position: fixed;
+  width: 100%;
+  height: 100dvh;
+}
+
+body.keyboard-open .mobile-chat-input,
+body.keyboard-open .chat-input-bar {
+  padding-bottom: calc(var(--space-md) + env(safe-area-inset-bottom, 0px));
+}
+
+body.keyboard-open .mobile-chat-messages {
+  scroll-padding-bottom: calc(var(--chat-input-min-height) + var(--space-xl));
 }
 
 body.mobile-chat-open .bottom-nav {

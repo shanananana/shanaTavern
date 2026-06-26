@@ -45,11 +45,15 @@ const MobileChat = {
       document.getElementById("mc-input").addEventListener("keydown", e => {
         if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); this.send(); }
       });
+      bindMobileChatViewport(document.getElementById("mc-input"));
     }
     this._prefetch();
   },
 
   _prefetch() {
+    const cached = ChatSessionStore.readCachedSessions(60000);
+    if (cached) this.sessions = cached;
+
     const sessKey = API._cacheKey("/api/chat/sessions");
     const charsKey = API._cacheKey("/api/characters");
     const sessHit = API._cache.get(sessKey);
@@ -58,18 +62,20 @@ const MobileChat = {
     const needChars = !charsHit || Date.now() - charsHit.at >= (charsHit.ttlMs || 300000);
     if (!needSess && !needChars) {
       this.sessions = sessHit.data || [];
+      ChatSessionStore.syncFromApiSessions(this.sessions);
       this.charMap = {};
-      (charsHit.data || []).forEach(c => { this.charMap[c.id] = c; });
+      characterItems(charsHit.data).forEach(c => { this.charMap[c.id] = c; });
       this._ready = true;
       return;
     }
     Promise.all([
       needSess ? API.cachedGet("/api/chat/sessions", 60000) : Promise.resolve(sessHit.data),
-      needChars ? API.cachedGet("/api/characters", 300000) : Promise.resolve(charsHit.data),
-    ]).then(([sessions, chars]) => {
+      needChars ? API.fetchCharacters("/api/characters", 300000) : Promise.resolve(normalizeCharacterPage(charsHit.data)),
+    ]).then(([sessions, charPage]) => {
       this.sessions = sessions || [];
+      ChatSessionStore.syncFromApiSessions(this.sessions);
       this.charMap = {};
-      (chars || []).forEach(c => { this.charMap[c.id] = c; });
+      (charPage.items || []).forEach(c => { this.charMap[c.id] = c; });
       this._ready = true;
     }).catch(() => {});
   },
@@ -110,22 +116,31 @@ const MobileChat = {
   },
 
   async _ensureSession() {
+    const storedId = ChatSessionStore.getSessionId(this.charId);
+    if (storedId) {
+      this.sessionId = storedId;
+      return;
+    }
     if (!this.sessions.length) {
       this.sessions = await API.cachedGet("/api/chat/sessions", 60000);
+      ChatSessionStore.syncFromApiSessions(this.sessions);
     }
     const existing = this.sessions.find(s => s.character_id === this.charId);
     if (existing) {
       this.sessionId = existing.id;
+      ChatSessionStore.setSessionId(this.charId, existing.id);
       return;
     }
     const s = await API.post("/api/chat/sessions", { character_id: this.charId });
     this.sessionId = s.id;
+    ChatSessionStore.setSessionId(this.charId, s.id);
     this.sessions.unshift({
       id: s.id,
       character_id: this.charId,
       character_name: this.char.name,
       title: "新对话",
     });
+    ChatSessionStore.cacheSessions(this.sessions);
   },
 
   async _loadMessages() {
@@ -144,12 +159,6 @@ const MobileChat = {
     this._scrollBottom();
   },
 
-  _finalizeBubble(bubble, text) {
-    bubble?.classList.remove("msg-streaming");
-    const wrap = bubble?.querySelector(".msg-content");
-    if (wrap) wrap.innerHTML = formatChatContent(text);
-  },
-
   async send() {
     if (this.streaming || !this.sessionId) return;
     const input = document.getElementById("mc-input");
@@ -166,39 +175,17 @@ const MobileChat = {
       content: text,
       userLabel: this._label(),
     }));
-
-    const wrapper = document.createElement("div");
-    wrapper.innerHTML = renderChatBubble({
-      role: "assistant",
-      content: "",
-      char: this.char,
-      streaming: true,
-    });
-    const bubble = wrapper.firstElementChild;
-    el.appendChild(bubble);
-    const contentEl = bubble.querySelector(".stream-content");
     this._scrollBottom();
 
-    try {
-      await API.stream(
-        `/api/chat/sessions/${this.sessionId}/send`,
-        { content: text },
-        token => { contentEl.textContent += token; this._scrollBottom(); },
-        () => {
-          this._finalizeBubble(bubble, contentEl.textContent);
-          this.streaming = false;
-          document.getElementById("mc-send").disabled = false;
-        },
-        err => {
-          contentEl.textContent = "错误: " + err;
-          this.streaming = false;
-          document.getElementById("mc-send").disabled = false;
-        }
-      );
-    } catch (ex) {
-      contentEl.textContent = "错误: " + ex.message;
-      this.streaming = false;
-      document.getElementById("mc-send").disabled = false;
-    }
+    await streamChatMessage({
+      sessionId: this.sessionId,
+      body: { content: text },
+      messagesEl: el,
+      char: this.char,
+      onComplete: () => {
+        this.streaming = false;
+        document.getElementById("mc-send").disabled = false;
+      },
+    });
   },
 };

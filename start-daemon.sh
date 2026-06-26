@@ -32,7 +32,7 @@ start_backend() {
     return 0
   fi
   cd "$ROOT/backend"
-  nohup .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8787 >> "$LOG" 2>&1 &
+  nohup .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8787 --timeout-graceful-shutdown 10 >> "$LOG" 2>&1 &
   echo $! > "$PIDFILE"
   for _ in 1 2 3 4 5 6 7 8 9 10; do
     curl -sf --connect-timeout 2 http://127.0.0.1:8787/ >/dev/null && break

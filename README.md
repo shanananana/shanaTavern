@@ -227,17 +227,6 @@ Default login (fresh install): `admin` / `changeme` — change immediately.
 
 License: [MIT](LICENSE)
 
----
-
-## 关于名字
-
-**shana** 来自动漫《灼眼的夏娜》中的角色夏娜（Shana），因为作者喜欢这部作品。  
-**Tavern** 借用了 SillyTavern 一脉的命名习惯，表示 AI 角色扮演聊天。  
-
-本项目与《灼眼的夏娜》官方 IP 无任何关联，仅为个人喜好命名。
-
----
-
 ## License
 
 MIT © shanaTavern contributors — see [LICENSE](LICENSE).

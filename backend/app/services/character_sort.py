@@ -23,4 +23,4 @@ def cuteness_score(tags: str) -> int:
 
 
 def sort_characters_by_cuteness(characters: list[Character]) -> list[Character]:
-    return sorted(characters, key=lambda c: (-cuteness_score(c.tags), c.id))
+    return sorted(characters, key=lambda c: (cuteness_score(c.tags), c.id))
